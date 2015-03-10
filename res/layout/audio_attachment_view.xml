@@ -38,7 +38,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:paddingBottom="10dip"
-            android:src="@drawable/ic_attach_capture_audio_holo_light" />
+            android:src="@drawable/ic_attach_capture_audio" />
 
         <TextView
             android:id="@+id/audio_name"
@@ -75,7 +75,7 @@
             style="?android:attr/buttonStyleSmall"
             android:layout_width="100dip"
             android:layout_height="45dip"
-            android:textColor="@android:color/black"
+            android:textColor="@color/button_text"
             android:text="@string/play" />
 
         <Button
@@ -83,7 +83,7 @@
             style="?android:attr/buttonStyleSmall"
             android:layout_width="100dip"
             android:layout_height="45dip"
-            android:textColor="@android:color/black"
+            android:textColor="@color/button_text"
             android:text="@string/replace" />
 
         <Button
@@ -91,7 +91,7 @@
             style="?android:attr/buttonStyleSmall"
             android:layout_width="100dip"
             android:layout_height="45dip"
-            android:textColor="@android:color/black"
+            android:textColor="@color/button_text"
             android:text="@string/remove" />
 
     </LinearLayout>

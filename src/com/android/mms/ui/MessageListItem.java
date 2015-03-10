@@ -25,19 +25,27 @@ import android.app.AlertDialog;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
+import android.content.res.Resources;
 import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Paint.FontMetricsInt;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.LayerDrawable;
+import android.graphics.drawable.StateListDrawable;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.Message;
+import android.preference.PreferenceManager;
 import android.provider.ContactsContract.Profile;
 import android.provider.Telephony.Sms;
+import android.support.v4.graphics.drawable.RoundedBitmapDrawable;
+import android.support.v4.graphics.drawable.RoundedBitmapDrawableFactory;
 import android.telephony.PhoneNumberUtils;
 import android.telephony.TelephonyManager;
 import android.text.Html;
 import android.text.SpannableStringBuilder;
+import android.text.Spanned;
 import android.text.TextUtils;
 import android.text.method.HideReturnsTransformationMethod;
 import android.text.style.ForegroundColorSpan;
@@ -47,6 +55,7 @@ import android.text.style.TextAppearanceSpan;
 import android.text.style.URLSpan;
 import android.util.AttributeSet;
 import android.util.Log;
+import android.util.TypedValue;
 import android.view.View;
 import android.view.View.OnClickListener;
 import android.view.ViewGroup;
@@ -55,15 +64,18 @@ import android.widget.Button;
 import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.QuickContactBadge;
 import android.widget.TextView;
 
 import com.android.mms.LogTag;
 import com.android.mms.MmsApp;
+import com.android.mms.MmsConfig;
 import com.android.mms.R;
 import com.android.mms.data.Contact;
 import com.android.mms.data.WorkingMessage;
 import com.android.mms.model.SlideModel;
 import com.android.mms.model.SlideshowModel;
+import com.android.mms.transaction.SmsReceiverService;
 import com.android.mms.transaction.Transaction;
 import com.android.mms.transaction.TransactionBundle;
 import com.android.mms.transaction.TransactionService;
@@ -102,31 +114,30 @@ public class MessageListItem extends LinearLayout implements
     private String mDefaultCountryIso;
     private TextView mDateView;
     public View mMessageBlock;
-    private QuickContactDivot mAvatar;
-    static private Drawable sDefaultContactImage;
+    private QuickContactBadge mAvatar;
+    static private RoundedBitmapDrawable sDefaultContactImage;
     private Presenter mPresenter;
     private int mPosition;      // for debugging
     private ImageLoadedCallback mImageLoadedCallback;
     private boolean mMultiRecipients;
 
     public MessageListItem(Context context) {
-        super(context);
-        mDefaultCountryIso = MmsApp.getApplication().getCurrentCountryIso();
-
-        if (sDefaultContactImage == null) {
-            sDefaultContactImage = context.getResources().getDrawable(R.drawable.ic_contact_picture);
-        }
+        this(context, null);
     }
 
     public MessageListItem(Context context, AttributeSet attrs) {
         super(context, attrs);
 
-        int color = mContext.getResources().getColor(R.color.timestamp_color);
-        mColorSpan = new ForegroundColorSpan(color);
+        Resources res = context.getResources();
+        mColorSpan = new ForegroundColorSpan(res.getColor(R.color.timestamp_color));
         mDefaultCountryIso = MmsApp.getApplication().getCurrentCountryIso();
 
         if (sDefaultContactImage == null) {
-            sDefaultContactImage = context.getResources().getDrawable(R.drawable.ic_contact_picture);
+            Bitmap defaultImage = BitmapFactory.decodeResource(res, R.drawable.ic_contact_picture);
+            sDefaultContactImage = RoundedBitmapDrawableFactory.create(res, defaultImage);
+            sDefaultContactImage.setAntiAlias(true);
+            sDefaultContactImage.setCornerRadius(
+                    Math.max(defaultImage.getWidth() / 2, defaultImage.getHeight() / 2));
         }
     }
 
@@ -135,15 +146,18 @@ public class MessageListItem extends LinearLayout implements
         super.onFinishInflate();
 
         mBodyTextView = (TextView) findViewById(R.id.text_view);
+        mBodyTextView.setTextSize(TypedValue.COMPLEX_UNIT_SP,Integer.parseInt(PreferenceManager.getDefaultSharedPreferences(getContext()).getString(MessagingPreferenceActivity.MESSAGE_FONT_SIZE, "18")));
         mDateView = (TextView) findViewById(R.id.date_view);
         mLockedIndicator = (ImageView) findViewById(R.id.locked_indicator);
         mDeliveredIndicator = (ImageView) findViewById(R.id.delivered_indicator);
         mDetailsIndicator = (ImageView) findViewById(R.id.details_indicator);
-        mAvatar = (QuickContactDivot) findViewById(R.id.avatar);
+        mAvatar = (QuickContactBadge) findViewById(R.id.avatar);
         mMessageBlock = findViewById(R.id.message_block);
+
     }
 
-    public void bind(MessageItem msgItem, boolean convHasMultiRecipients, int position) {
+    public void bind(MessageItem msgItem, int accentColor,
+            boolean convHasMultiRecipients, int position) {
         if (DEBUG) {
             Log.v(TAG, "bind for item: " + position + " old: " +
                    (mMessageItem != null ? mMessageItem.toString() : "NULL" ) +
@@ -168,6 +182,21 @@ public class MessageListItem extends LinearLayout implements
             default:
                 bindCommonMessage(sameItem);
                 break;
+        }
+        tintBackground(mMessageBlock.getBackground(), accentColor);
+    }
+
+    private void tintBackground(Drawable background, int color) {
+        if (background instanceof LayerDrawable) {
+            Drawable base = ((LayerDrawable) background).findDrawableByLayerId(R.id.base_layer);
+            if (base instanceof StateListDrawable) {
+                StateListDrawable sld = (StateListDrawable) base;
+                base = sld.getStateDrawable(sld.getStateDrawableIndex(null));
+
+            }
+            if (base != null) {
+                base.setTint(color);
+            }
         }
     }
 
@@ -283,7 +312,7 @@ public class MessageListItem extends LinearLayout implements
         Drawable avatarDrawable;
         if (isSelf || !TextUtils.isEmpty(addr)) {
             Contact contact = isSelf ? Contact.getMe(false) : Contact.get(addr, false);
-            avatarDrawable = contact.getAvatar(mContext, sDefaultContactImage);
+            contact.bindAvatar(mAvatar);
 
             if (isSelf) {
                 mAvatar.assignContactUri(Profile.CONTENT_URI);
@@ -295,9 +324,8 @@ public class MessageListItem extends LinearLayout implements
                 }
             }
         } else {
-            avatarDrawable = sDefaultContactImage;
+            mAvatar.setImageDrawable(sDefaultContactImage);
         }
-        mAvatar.setImageDrawable(avatarDrawable);
     }
 
     private void bindCommonMessage(final boolean sameItem) {
@@ -363,9 +391,14 @@ public class MessageListItem extends LinearLayout implements
         // If we're in the process of sending a message (i.e. pending), then we show a "SENDING..."
         // string in place of the timestamp.
         if (!sameItem || haveLoadedPdu) {
+            boolean isCountingDown = mMessageItem.getCountDown() > 0 &&
+                    MessagingPreferenceActivity.getMessageSendDelayDuration(mContext) > 0;
+            int sendingTextResId = isCountingDown
+                    ? R.string.sent_countdown : R.string.sending_message;
+
             mDateView.setText(buildTimestampLine(mMessageItem.isSending() ?
-                    mContext.getResources().getString(R.string.sending_message) :
-                        mMessageItem.mTimestamp));
+                    mContext.getResources().getString(sendingTextResId) :
+                    mMessageItem.mTimestamp));
         }
         if (mMessageItem.isSms()) {
             showMmsView(false);
@@ -474,7 +507,10 @@ public class MessageListItem extends LinearLayout implements
         showMmsView(true);
 
         try {
-            mImageView.setImageBitmap(bitmap);
+            RoundedBitmapDrawable drawable =
+                    RoundedBitmapDrawableFactory.create(getResources(), bitmap);
+            drawable.setCornerRadius(MmsConfig.getMmsCornerRadius());
+            mImageView.setImageDrawable(drawable);
             mImageView.setVisibility(VISIBLE);
         } catch (java.lang.OutOfMemoryError e) {
             Log.e(TAG, "setImage: out of memory: ", e);
@@ -605,6 +641,11 @@ public class MessageListItem extends LinearLayout implements
     }
 
     public void onMessageListItemClick() {
+        if (mMessageItem != null && mMessageItem.isSending() && mMessageItem.isSms()) {
+            SmsReceiverService.cancelSendingMessage(mMessageItem.mMessageUri);
+            return;
+        }
+
         // If the message is a failed one, clicking it should reload it in the compose view,
         // regardless of whether it has links in it
         if (mMessageItem != null &&
@@ -834,5 +875,19 @@ public class MessageListItem extends LinearLayout implements
     public void seekVideo(int seekTo) {
         // TODO Auto-generated method stub
 
+    }
+
+    public void updateDelayCountDown() {
+        if (mMessageItem.isSms() && mMessageItem.getCountDown() > 0 && mMessageItem.isSending()) {
+            String content = mContext.getResources().getQuantityString(
+                    R.plurals.remaining_delay_time,
+                    mMessageItem.getCountDown(), mMessageItem.getCountDown());
+            Spanned spanned = Html.fromHtml(buildTimestampLine(content));
+            mDateView.setText(spanned);
+        } else {
+            mDateView.setText(buildTimestampLine(mMessageItem.isSending()
+                    ? mContext.getResources().getString(R.string.sending_message)
+                    : mMessageItem.mTimestamp));
+        }
     }
 }
